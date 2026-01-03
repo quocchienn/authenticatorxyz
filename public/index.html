@@ -1,130 +1,57 @@
 <!DOCTYPE html>
-<html lang="vi">
+<html>
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>My Authenticator</title>
-    <style>
-        body { font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 20px; }
-        input { display: block; margin: 10px 0; width: 100%; padding: 8px; }
-        button { padding: 8px 16px; margin-right: 10px; }
-        .account { border: 1px solid #ddd; padding: 10px; margin: 10px 0; border-radius: 5px; }
-        .totp { font-size: 1.5em; font-weight: bold; }
-        .delete-btn { background: red; color: white; border: none; padding: 5px 10px; cursor: pointer; }
-        video, canvas { display: none; }
-    </style>
-    <script src="https://unpkg.com/jsqr/dist/jsQR.js"></script>  <!-- For QR scanning -->
+<meta charset="utf-8" />
+<title>Auction Pro Slots</title>
+<script src="/socket.io/socket.io.js"></script>
 </head>
 <body>
-    <h1>Authenticator Web</h1>
-    <input id="name" placeholder="Tên account (ví dụ: Google)">
-    <input id="issuer" placeholder="Issuer (tùy chọn, ví dụ: Google)">
-    <input id="secret" placeholder="Secret key hoặc otpauth URI">
-    <button onclick="addAccount()">Thêm Account</button>
-    <button onclick="startQRScan()">Scan QR Code</button>
-    <video id="video" width="100%" height="auto"></video>
-    <canvas id="canvas"></canvas>
-    <div id="codes"></div>
+<h2>Đấu giá tài khoản Pro</h2>
+<input id="user" placeholder="Tên người dùng" />
+<button onclick="createUser()">Tạo user</button>
+<p id="balance"></p>
+<hr>
+<div id="auctions"></div>
 
-    <script>
-        const API_URL = 'http://localhost:3000';  // Thay bằng Render URL sau deploy, ví dụ: 'https://your-app.onrender.com'
 
-        async function fetchAccounts() {
-            try {
-                const res = await fetch(`${API_URL}/accounts`);
-                if (!res.ok) throw new Error('Network error');
-                const accounts = await res.json();
-                const div = document.getElementById('codes');
-                div.innerHTML = '';
-                accounts.forEach(acc => {
-                    const el = document.createElement('div');
-                    el.className = 'account';
-                    el.innerHTML = `
-                        <strong>${acc.name} (${acc.issuer || 'No issuer'})</strong>
-                        <span class="totp">${acc.totp}</span>
-                        <small>Còn ${acc.timeRemaining} giây</small>
-                        <button class="delete-btn" onclick="deleteAccount('${acc._id}')">Xóa</button>
-                    `;
-                    div.appendChild(el);
-                });
-            } catch (err) {
-                console.error(err);
-                alert('Lỗi khi tải accounts: ' + err.message);
-            }
-        }
+<script>
+const socket = io();
+let currentUser;
 
-        async function addAccount() {
-            const name = document.getElementById('name').value.trim();
-            const issuer = document.getElementById('issuer').value.trim();
-            const secret = document.getElementById('secret').value.trim();
-            if (!secret) return alert('Secret required');
-            try {
-                const res = await fetch(`${API_URL}/add-account`, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ name, issuer, secret })
-                });
-                if (!res.ok) throw new Error('Add failed');
-                fetchAccounts();
-                document.getElementById('name').value = '';
-                document.getElementById('issuer').value = '';
-                document.getElementById('secret').value = '';
-            } catch (err) {
-                alert('Lỗi thêm account: ' + err.message);
-            }
-        }
 
-        async function deleteAccount(id) {
-            if (!confirm('Xác nhận xóa?')) return;
-            try {
-                const res = await fetch(`${API_URL}/account/${id}`, { method: 'DELETE' });
-                if (!res.ok) throw new Error('Delete failed');
-                fetchAccounts();
-            } catch (err) {
-                alert('Lỗi xóa: ' + err.message);
-            }
-        }
+function createUser(){
+fetch('/api/user',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({username:document.getElementById('user').value})})
+.then(r=>r.json()).then(u=>{currentUser=u; updateBalance();});
+}
 
-        // QR Scanning
-        let stream;
-        async function startQRScan() {
-            const video = document.getElementById('video');
-            const canvas = document.getElementById('canvas');
-            video.style.display = 'block';
-            try {
-                stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment' } });
-                video.srcObject = stream;
-                video.play();
-                requestAnimationFrame(scanQR);
-            } catch (err) {
-                alert('Lỗi camera: ' + err.message);
-            }
-        }
 
-        function scanQR() {
-            const video = document.getElementById('video');
-            const canvas = document.getElementById('canvas');
-            if (video.readyState === video.HAVE_ENOUGH_DATA) {
-                canvas.height = video.videoHeight;
-                canvas.width = video.videoWidth;
-                const ctx = canvas.getContext('2d');
-                ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
-                const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-                const code = jsQR(imageData.data, imageData.width, imageData.height);
-                if (code) {
-                    document.getElementById('secret').value = code.data;
-                    stream.getTracks().forEach(track => track.stop());
-                    video.style.display = 'none';
-                    alert('QR scanned: ' + code.data);
-                    return;
-                }
-            }
-            requestAnimationFrame(scanQR);
-        }
+function updateBalance(){
+document.getElementById('balance').innerText = 'Số dư: '+currentUser.balance;
+}
 
-        // Initial load and realtime update
-        fetchAccounts();
-        setInterval(fetchAccounts, 1000);
-    </script>
+
+function load(){
+fetch('/api/auctions').then(r=>r.json()).then(list=>{
+document.getElementById('auctions').innerHTML = list.map(a=>`
+<div>
+<b>${a.product}</b><br>
+Giá: ${a.currentPrice}<br>
+Trạng thái: ${a.status}<br>
+<button onclick="bid('${a._id}')">Bid</button>
+</div><hr>`).join('');
+});
+}
+
+
+function bid(id){
+const amount = prompt('Nhập giá bid');
+socket.emit('bid',{ auctionId:id, userId:currentUser._id, amount:+amount });
+}
+
+
+socket.on('update', load);
+socket.on('ended', load);
+load();
+</script>
 </body>
 </html>
