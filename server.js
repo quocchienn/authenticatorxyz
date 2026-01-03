@@ -1,99 +1,96 @@
-require('dotenv').config();
-const express = require('express');
-const mongoose = require('mongoose');
-const otplib = require('otplib');
-const CryptoJS = require('crypto-js');
-const bodyParser = require('body-parser');
-const cors = require('cors');
-const QRCode = require('qrcode');
-const path = require('path');
+// FULL AUCTION WEB – Backend + Frontend
+// Công nghệ: Node.js + Express + MongoDB + Socket.IO
+// Deploy: Render (Web Service)
+// ================= BACKEND =================
+
+
+// server.js
+import express from "express";
+import http from "http";
+import { Server } from "socket.io";
+import mongoose from "mongoose";
+import cors from "cors";
+
 
 const app = express();
-app.use(bodyParser.json());
+const server = http.createServer(app);
+const io = new Server(server, { cors: { origin: "*" } });
+
+
 app.use(cors());
-app.use(express.static(path.join(__dirname, 'public')));  // Serve frontend
+app.use(express.json());
+app.use(express.static("public"));
 
-mongoose.connect(process.env.MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true })
-  .then(() => console.log('Connected to MongoDB'))
-  .catch(err => console.error('MongoDB connection error:', err));
 
-// Schema cho Account
-const accountSchema = new mongoose.Schema({
-  name: String,
-  issuer: String,
-  secret: String,  // Encrypted
+// ===== MongoDB =====
+mongoose.connect(process.env.MONGO_URI)
+.then(() => console.log("MongoDB connected"))
+.catch(err => console.error(err));
+
+
+// ===== Models =====
+const UserSchema = new mongoose.Schema({
+username: String,
+balance: { type: Number, default: 0 }
 });
 
-const Account = mongoose.model('Account', accountSchema);
 
-// Encrypt/Decrypt functions
-const encrypt = (text) => CryptoJS.AES.encrypt(text, process.env.ENCRYPT_KEY).toString();
-const decrypt = (ciphertext) => CryptoJS.AES.decrypt(ciphertext, process.env.ENCRYPT_KEY).toString(CryptoJS.enc.Utf8);
-
-// API: Get all accounts with TOTP
-app.get('/accounts', async (req, res) => {
-  try {
-    const accounts = await Account.find();
-    const results = accounts.map(acc => ({
-      _id: acc._id,
-      name: acc.name,
-      issuer: acc.issuer,
-      totp: otplib.authenticator.generate(decrypt(acc.secret)),
-      timeRemaining: otplib.authenticator.timeRemaining(),
-    }));
-    res.json(results);
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+const AuctionSchema = new mongoose.Schema({
+product: String,
+duration: Number,
+startPrice: Number,
+currentPrice: Number,
+endTime: Date,
+winner: String,
+status: { type: String, default: "active" }
 });
 
-// API: Add account
-app.post('/add-account', async (req, res) => {
-  try {
-    let { name, issuer, secret } = req.body;
-    if (!secret) throw new Error('Secret required');
 
-    // Parse otpauth URI if provided
-    if (secret.startsWith('otpauth://')) {
-      const url = new URL(secret);
-      secret = url.searchParams.get('secret');
-      issuer = url.searchParams.get('issuer') || issuer;
-      name = decodeURIComponent(url.pathname.replace(/^\/totp\//, '')) || name;
-    }
-
-    const encryptedSecret = encrypt(secret);
-    const newAccount = new Account({ name, issuer, secret: encryptedSecret });
-    await newAccount.save();
-    res.json({ message: 'Account added' });
-  } catch (err) {
-    res.status(400).json({ error: err.message });
-  }
+const BidSchema = new mongoose.Schema({
+auctionId: mongoose.Schema.Types.ObjectId,
+user: String,
+amount: Number,
+time: { type: Date, default: Date.now }
 });
 
-// API: Delete account
-app.delete('/account/:id', async (req, res) => {
-  try {
-    await Account.findByIdAndDelete(req.params.id);
-    res.json({ message: 'Account deleted' });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
+
+const User = mongoose.model("User", UserSchema);
+const Auction = mongoose.model("Auction", AuctionSchema);
+const Bid = mongoose.model("Bid", BidSchema);
+
+
+// ===== API =====
+app.post("/api/user", async (req, res) => {
+const user = await User.create({ username: req.body.username });
+res.json(user);
 });
 
-// API: Generate QR (optional, if frontend needs)
-app.post('/generate-qr', (req, res) => {
-  const { secret, name, issuer } = req.body;
-  const otpauth = otplib.authenticator.keyuri(name, issuer, secret);
-  QRCode.toDataURL(otpauth, (err, url) => {
-    if (err) return res.status(500).json({ error: err.message });
-    res.json({ qrUrl: url });
-  });
+
+app.post("/api/topup", async (req, res) => {
+const user = await User.findById(req.body.userId);
+user.balance += req.body.amount;
+await user.save();
+res.json(user);
 });
 
-// Fallback to serve index.html
-app.get('*', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'index.html'));
+
+app.post("/api/auction", async (req, res) => {
+const auction = await Auction.create({
+product: req.body.product,
+duration: req.body.duration,
+startPrice: req.body.startPrice,
+currentPrice: req.body.startPrice,
+endTime: new Date(Date.now() + req.body.duration * 60000)
+});
+res.json(auction);
 });
 
-const port = process.env.PORT || 3000;
-app.listen(port, () => console.log(`Server running on port ${port}`));
+
+app.get("/api/auctions", async (req, res) => {
+res.json(await Auction.find());
+});
+
+
+// ===== Socket.IO =====
+io.on("connection", socket => {
+server.listen(PORT, () => console.log("Running on", PORT));
